@@ -37,7 +37,7 @@ const App = () => {
     fbLink: "",
     trackingCode: "",
   });
-  const [foundOrder, setFoundOrder] = useState<Order | null>(null);
+  const [foundOrders, setFoundOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
@@ -192,28 +192,56 @@ const App = () => {
   // Search function
   const handleSearch = () => {
     if (!searchTerm.trim()) {
-      setFoundOrder(null);
+      setFoundOrders([]);
       return;
     }
 
-    const found = orders.find(
-      (order) =>
-        order?.tracking_code
-          ?.toString()
-          ?.toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        order?.name
-          ?.toString()
-          ?.toLowerCase()
-          .includes(searchTerm.toLowerCase())
-    );
-    setFoundOrder(found || null);
+    // Split search term by newlines and filter out empty lines
+    const searchTerms = searchTerm
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    // If multiple lines, search for tracking codes only
+    if (searchTerms.length > 1) {
+      // Clean tracking codes (remove any prefix like "PThanh")
+      const trackingCodes = searchTerms.map((term) => {
+        // Remove common prefixes and get the actual tracking code
+        const cleaned = term.replace(/^[A-Za-z]+\s*/, "").trim();
+        return cleaned || term; // fallback to original term if cleaning results in empty string
+      });
+
+      // Find ALL matching orders
+      const foundMatches = orders.filter((order) =>
+        trackingCodes.some((code) =>
+          order?.tracking_code
+            ?.toString()
+            ?.toLowerCase()
+            .includes(code.toLowerCase())
+        )
+      );
+      setFoundOrders(foundMatches);
+    } else {
+      // Single search term - search both name and tracking code as before
+      const found = orders.filter(
+        (order) =>
+          order?.tracking_code
+            ?.toString()
+            ?.toLowerCase()
+            .includes(searchTerm.toLowerCase()) ||
+          order?.name
+            ?.toString()
+            ?.toLowerCase()
+            .includes(searchTerm.toLowerCase())
+      );
+      setFoundOrders(found);
+    }
   };
 
   // Auto-search when searchTerm changes
   useEffect(() => {
     handleSearch();
-  }, [searchTerm, orders, handleSearch]);
+  }, [searchTerm, orders]);
 
   // Paste from clipboard
   const handlePasteFromClipboard = async () => {
@@ -263,19 +291,10 @@ const App = () => {
       // Reload data to reflect changes
       await loadFromSupabase();
 
-      if (foundOrder && foundOrder.id === id) {
-        setFoundOrder(null);
-      }
+      // Remove the deleted order from found orders
+      setFoundOrders(foundOrders.filter((order) => order.id !== id));
     } else {
       setConnectionStatus("error");
-    }
-  };
-
-  // Quick delete by tracking code
-  const handleQuickDelete = async () => {
-    if (foundOrder) {
-      await handleDeleteOrder(foundOrder.id);
-      setSearchTerm("");
     }
   };
 
@@ -493,12 +512,12 @@ const App = () => {
             Tìm Kiếm Đơn Hàng
           </h2>
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mb-3 sm:mb-4">
-            <input
-              type="text"
-              placeholder="Nhập mã vận đơn hoặc tên..."
+            <textarea
+              placeholder="Nhập mã vận đơn hoặc tên... (có thể paste nhiều mã vận đơn, mỗi mã một dòng)"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1 px-3 py-2 sm:px-4 sm:py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm sm:text-base"
+              rows={3}
+              className="flex-1 px-3 py-2 sm:px-4 sm:py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-sm sm:text-base resize-none"
             />
             <button
               onClick={handlePasteFromClipboard}
@@ -509,39 +528,46 @@ const App = () => {
             </button>
           </div>
 
-          {/* Search Result */}
-          {foundOrder && (
-            <div className="bg-yellow-100 border border-yellow-300 p-3 sm:p-4 rounded-lg">
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-3">
-                <div className="flex-1">
-                  <h3 className="font-semibold text-yellow-800 text-sm sm:text-base mb-2">
-                    🎯 Tìm Thấy Đơn Hàng:
-                  </h3>
-                  <div className="space-y-1 text-sm sm:text-base">
-                    <p>
-                      <strong>Tên:</strong> {foundOrder.name}
-                    </p>
-                    <p className="break-all">
-                      <strong>Facebook:</strong> {foundOrder.fb_link}
-                    </p>
-                    <p>
-                      <strong>Mã vận đơn:</strong> {foundOrder.tracking_code}
-                    </p>
+          {/* Search Results */}
+          {foundOrders.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-yellow-800 text-sm sm:text-base">
+                🎯 Tìm Thấy {foundOrders.length} Đơn Hàng:
+              </h3>
+              {foundOrders.map((order) => (
+                <div
+                  key={order.id}
+                  className="bg-yellow-100 border border-yellow-300 p-3 sm:p-4 rounded-lg"
+                >
+                  <div className="flex flex-col sm:flex-row sm:justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="space-y-1 text-sm sm:text-base">
+                        <p>
+                          <strong>Tên:</strong> {order.name}
+                        </p>
+                        <p className="break-all">
+                          <strong>Facebook:</strong> <a href={order.fb_link} target="_blank" rel="noopener noreferrer">{order.fb_link}</a>
+                        </p>
+                        <p>
+                          <strong>Mã vận đơn:</strong> {order.tracking_code}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteOrder(order.id)}
+                      className="px-3 py-2 h-fit sm:px-4 sm:py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 justify-center text-sm sm:text-base self-start sm:self-auto"
+                    >
+                      <Trash2 size={14} className="sm:w-4 sm:h-4" />
+                      <span className="hidden sm:inline">Hàng Đã Về - Xóa</span>
+                      <span className="sm:hidden">Xóa</span>
+                    </button>
                   </div>
                 </div>
-                <button
-                  onClick={handleQuickDelete}
-                  className="px-3 py-2 h-fit sm:px-4 sm:py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 justify-center text-sm sm:text-base self-start sm:self-auto"
-                >
-                  <Trash2 size={14} className="sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">Hàng Đã Về - Xóa</span>
-                  <span className="sm:hidden">Xóa</span>
-                </button>
-              </div>
+              ))}
             </div>
           )}
 
-          {searchTerm && !foundOrder && (
+          {searchTerm && foundOrders.length === 0 && (
             <div className="bg-gray-100 border border-gray-300 p-3 sm:p-4 rounded-lg text-gray-800 text-sm sm:text-base">
               Không tìm thấy đơn hàng nào với từ khóa "{searchTerm}"
             </div>
